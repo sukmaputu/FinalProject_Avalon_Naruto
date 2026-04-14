@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+MachineLearningCSV/
+*.csv
+*.zip
+*.pkl
+
+venv/
+.env
