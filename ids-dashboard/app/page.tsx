@@ -9,7 +9,14 @@ type PredictionResponse =
       prediction: number;
       result: string;
       confidence: number;
-      top_features?: string[]; // ini optional
+      top_features?: string[];
+      severity?: string;
+      recommendation?: string;
+      attack_type?: string;
+      shap_explanation?: {
+        feature: string;
+        impact: number;
+      }[];
     }
   | {
       total_data: number;
@@ -28,6 +35,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  console.log("RESULT:", result);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -158,6 +166,29 @@ export default function Home() {
     setLoading(false);
   };
 
+  const handlePredictFromCSV = async () => {
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/predict-single-from-csv", {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json();
+      setResult(json);
+    } catch {
+      setResult({ error: "Connection error ❌" });
+    }
+
+    setLoading(false);
+  };
+
   const isSingleResult = (
     res: PredictionResponse,
   ): res is {
@@ -165,6 +196,9 @@ export default function Home() {
     result: string;
     confidence: number;
     top_features?: string[];
+    severity?: string;
+    recommendation?: string;
+    attack_type?: string;
   } => {
     return "result" in res;
   };
@@ -182,6 +216,18 @@ export default function Home() {
           value: 100 - i * 15,
         }))
       : [];
+
+  const shapData =
+    result && isSingleResult(result) && result.shap_explanation
+      ? result.shap_explanation.map(
+          (item: { feature: string; impact: number }) => ({
+            name: item.feature,
+            value: Math.abs(item.impact),
+            impact: item.impact,
+          }),
+        )
+      : [];
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-6">
       {" "}
@@ -224,6 +270,13 @@ export default function Home() {
             className="mt-3 w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-lg"
           >
             Upload CSV
+          </button>
+
+          <button
+            onClick={handlePredictFromCSV}
+            className="mt-2 w-full py-2 bg-green-600 hover:bg-green-700 rounded-lg"
+          >
+            Predict 1 Data from CSV
           </button>
 
           {lastUpdated && (
@@ -372,7 +425,7 @@ export default function Home() {
 
                       {/* Chart */}
                       <div className="w-full h-64">
-                        <ResponsiveContainer>
+                        <ResponsiveContainer width="100%" height={200}>
                           <PieChart>
                             <Pie
                               data={chartData}
@@ -411,6 +464,35 @@ export default function Home() {
                       : "🛡️ NORMAL TRAFFIC"}
                   </p>
 
+                  {result.severity && (
+                    <div className="mt-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          result.severity.includes("CRITICAL")
+                            ? "bg-red-500/20 text-red-400 border border-red-400"
+                            : result.severity.includes("HIGH")
+                              ? "bg-orange-500/20 text-orange-300 border border-orange-400"
+                              : result.severity.includes("MEDIUM")
+                                ? "bg-yellow-500/20 text-yellow-300 border border-yellow-400"
+                                : "bg-green-500/20 text-green-300 border border-green-400"
+                        }`}
+                      >
+                        {result.severity}
+                      </span>
+                    </div>
+                  )}
+
+                  {result.recommendation && (
+                    <div className="mt-4 p-4 bg-blue-500/10 border border-blue-400 rounded-xl">
+                      <p className="text-xs text-blue-300 font-semibold mb-1">
+                        💡 Recommended Action
+                      </p>
+                      <p className="text-sm text-gray-200">
+                        {result.recommendation}
+                      </p>
+                    </div>
+                  )}
+
                   <p className="text-sm text-gray-300 mt-2">
                     Real-time prediction from AI model
                   </p>
@@ -428,7 +510,7 @@ export default function Home() {
 
                     {/* Chart */}
                     <div className="w-full h-40">
-                      <ResponsiveContainer>
+                      <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={featureData}>
                           <XAxis
                             dataKey="name"
@@ -454,6 +536,65 @@ export default function Home() {
                     </div>
                     <p className="text-[10px] text-gray-500 mt-2 text-center">
                       Top features contributing to AI decision
+                    </p>
+                  </div>
+                )}
+
+              {result &&
+                isSingleResult(result) &&
+                result.shap_explanation &&
+                shapData.length > 0 && (
+                  <div className="mt-6 p-4 bg-black/30 rounded-xl border border-white/10">
+                    <p className="text-xs text-gray-400 mb-3 flex items-center gap-1">
+                      🧠 <span>SHAP Explainability (AI Reasoning)</span>
+                    </p>
+
+                    <div className="w-full h-48">
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart data={shapData}>
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                            interval={0}
+                            angle={-20}
+                            textAnchor="end"
+                            height={50}
+                          />
+                          <YAxis hide />
+                          <Tooltip
+                            formatter={(value, name, props) => {
+                              const val = typeof value === "number" ? value : 0;
+                              const impact = props?.payload?.impact ?? 0;
+
+                              return [
+                                val.toFixed(3),
+                                impact > 0
+                                  ? "Positive Impact"
+                                  : "Negative Impact",
+                              ];
+                            }}
+                            contentStyle={{
+                              backgroundColor: "#111827",
+                              border: "1px solid #374151",
+                              borderRadius: "8px",
+                              fontSize: "12px",
+                            }}
+                          />
+
+                          <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                            {shapData.map((entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.impact > 0 ? "#EF4444" : "#10B981"}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <p className="text-[10px] text-gray-500 mt-2 text-center">
+                      Red = increases attack probability, Green = reduces risk
                     </p>
                   </div>
                 )}
